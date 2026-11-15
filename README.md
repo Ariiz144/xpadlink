@@ -25,6 +25,7 @@ phone (Flutter app) --UDP, 60 Hz--> xpadlinkd (Go) --/dev/uinput--> virtual Xbox
   - [Vibration](#vibration)
   - [Motion (gyro) in Cemu](#motion-gyro-in-cemu)
 - [Calibration](#calibration)
+- [Customizable touch controls](#customizable-touch-controls)
 - [Run in the background](#run-in-the-background)
 - [Troubleshooting](#troubleshooting)
 - [Reference](#reference)
@@ -37,7 +38,7 @@ phone (Flutter app) --UDP, 60 Hz--> xpadlinkd (Go) --/dev/uinput--> virtual Xbox
 ## Features
 
 - A virtual Xbox 360 pad (`045e:028e`), so SDL, Steam, Proton, Cemu and browsers work without mapping.
-- Touch controls on the phone, or a real controller plugged into it.
+- Customizable touch controls on the phone (reposition, scale, toggle visibility, adjust opacity, haptics, and presets), or a real controller plugged into it.
 - Over Wi-Fi, or over Bluetooth when there is no shared network.
 - The app finds your PC on Wi-Fi by itself. No typing an IP.
 - Up to 4 phones at once, one virtual pad each.
@@ -167,6 +168,23 @@ Values are stored on the phone, per controller name, and applied in the app befo
 Triggers and sticks need a physical controller that has sent some input. Press a button first. The touch controls are not calibrated.
 
 A pad that reports an analog trigger axis is read as analog. The L2/R2 key is only used as an on/off fallback for pads with no analog trigger axis.
+
+## Customizable touch controls
+
+The mobile app includes an interactive on-screen touch control customization system:
+- **Reposition any control**: Drag sticks, D-pad, face buttons (ABXY), bumpers, triggers, and center buttons anywhere on screen.
+- **Per-control scaling**: Resize buttons and sticks between 50% and 200% to fit your hand size and screen layout.
+- **Visibility toggles**: Hide unused buttons (such as L3/R3 or analog sticks for retro games).
+- **Transparency**: Adjust global button opacity from subtle (10%) to solid (100%).
+- **Haptic feedback**: Optional vibration feedback on button touches.
+- **Layout presets**:
+  - **Default (Xbox)**: Standard asymmetrical layout.
+  - **PlayStation Symmetrical**: Sticks at the bottom, D-pad and face buttons on top.
+  - **Southpaw (Inverted)**: Swapped sticks and action buttons for left-handed players.
+  - **4-Finger Claw**: Stacked top triggers and bumpers for multi-finger competitive claw grip.
+  - **Retro / 2D Arcade**: Enlarged D-pad and buttons with analog sticks hidden.
+- **Persistent storage**: Layouts are automatically saved to your device and restored across app restarts.
+- **Accessing the editor**: Tap the customize button (`dashboard_customize`) in the top bar of the controller screen or from the connect screen.
 
 ## Run in the background
 

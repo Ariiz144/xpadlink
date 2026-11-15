@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'calibration.dart';
 import 'client.dart';
 import 'discovery.dart';
+import 'layout.dart';
+import 'layout_editor.dart';
 import 'link.dart';
 import 'log.dart';
 import 'onscreen.dart';
@@ -258,6 +260,14 @@ class _ConnectScreenState extends State<ConnectScreen>
         TextSpan(text: 'LINK', style: display(20, color: C.lime, spacing: 3.2)),
       ])),
       const Spacer(),
+      IconButton(
+        tooltip: 'Customize touch controls',
+        icon: const Icon(Icons.dashboard_customize_outlined, size: 20, color: C.ink),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => const LayoutEditorScreen(),
+        )),
+      ),
+      const SizedBox(width: 8),
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
@@ -684,6 +694,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
   final _calStore = CalibrationStore();
   PadCalibration _padCal = PadCalibration();
   MotionCalibration _motionCal = MotionCalibration();
+  final _layoutStore = LayoutStore();
+  PadLayoutConfig _layout = PadLayoutConfig.defaultXbox();
+  bool _editingLayout = false;
+  String _selectedControlId = ControlId.leftStick;
+  bool _layoutDirty = false;
   bool _showOverlay = true;
   String? _error;
   Timer? _readout; // refreshes the stick values while the touch controls are hidden
@@ -704,6 +719,9 @@ class _ControllerScreenState extends State<ControllerScreen> {
     _padSub = _channel.receiveBroadcastStream().listen(_onPhysical,
         onError: (Object e) => _log.e('gamepad channel error', e));
     _calStore.loadMotion().then((c) => _motionCal = c);
+    _layoutStore.load().then((l) {
+      if (mounted) setState(() => _layout = l);
+    });
     _setMotion(true);
     _readout = Timer.periodic(const Duration(milliseconds: 120), (_) {
       if (mounted && !_showOverlay) setState(() {});
@@ -789,8 +807,147 @@ class _ControllerScreenState extends State<ControllerScreen> {
     super.dispose();
   }
 
+  void _startLayoutEdit() {
+    setState(() {
+      _showOverlay = true;
+      _editingLayout = true;
+    });
+  }
+
+  Future<void> _saveLayout() async {
+    await _layoutStore.save(_layout);
+    if (!mounted) return;
+    setState(() {
+      _layoutDirty = false;
+      _editingLayout = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Touch layout saved!')),
+    );
+  }
+
+  void _cancelLayoutEdit() async {
+    final loaded = await _layoutStore.load();
+    if (!mounted) return;
+    setState(() {
+      _layout = loaded;
+      _layoutDirty = false;
+      _editingLayout = false;
+    });
+  }
+
+  void _onElementMoved(String id, double relX, double relY) {
+    setState(() {
+      final elem = _layout.getElement(id);
+      elem.relX = relX;
+      elem.relY = relY;
+      _selectedControlId = id;
+      _layoutDirty = true;
+    });
+  }
+
+  void _changeScale(double delta) {
+    setState(() {
+      final elem = _layout.getElement(_selectedControlId);
+      elem.scale = ((elem.scale + delta) * 100).round() / 100;
+      elem.scale = elem.scale.clamp(0.5, 2.0);
+      _layoutDirty = true;
+    });
+  }
+
+  void _toggleVisibility() {
+    setState(() {
+      final elem = _layout.getElement(_selectedControlId);
+      elem.visible = !elem.visible;
+      _layoutDirty = true;
+    });
+  }
+
+  void _resetSelectedElement() {
+    setState(() {
+      _layout.resetElement(_selectedControlId);
+      _layoutDirty = true;
+    });
+  }
+
+  void _resetAllElements() {
+    setState(() {
+      _layout = PadLayoutConfig.defaultXbox();
+      _layoutDirty = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Reset all controls to Xbox default')),
+    );
+  }
+
+  void _cycleElement(int direction) {
+    final ids = ControlId.all;
+    final idx = ids.indexOf(_selectedControlId);
+    final nextIdx = (idx + direction + ids.length) % ids.length;
+    setState(() => _selectedControlId = ids[nextIdx]);
+  }
+
+  void _showPresets() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: C.panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        side: BorderSide(color: C.line),
+      ),
+      builder: (ctx) => LayoutPresetsSheet(
+        onSelect: (preset) {
+          Navigator.pop(ctx);
+          setState(() {
+            _layout = preset;
+            _layoutDirty = true;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Preset applied')),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showSettings() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => LayoutSettingsDialog(
+          opacity: _layout.opacity,
+          hapticsEnabled: _layout.hapticsEnabled,
+          snapToGrid: _layout.snapToGrid,
+          onOpacityChanged: (v) {
+            setDialogState(() => _layout.opacity = v);
+            setState(() {
+              _layout.opacity = v;
+              _layoutDirty = true;
+            });
+          },
+          onHapticsChanged: (v) {
+            setDialogState(() => _layout.hapticsEnabled = v);
+            setState(() {
+              _layout.hapticsEnabled = v;
+              _layoutDirty = true;
+            });
+          },
+          onSnapChanged: (v) {
+            setDialogState(() => _layout.snapToGrid = v);
+            setState(() {
+              _layout.snapToGrid = v;
+              _layoutDirty = true;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final selectedElem = _layout.getElement(_selectedControlId);
+
     return Scaffold(
       backgroundColor: C.bg,
       body: ConsoleBackdrop(
@@ -799,17 +956,45 @@ class _ControllerScreenState extends State<ControllerScreen> {
             // Stays mounted while hidden, so a held touch isn't dropped mid-press.
             Positioned.fill(
               top: 58,
+              bottom: _editingLayout ? 54 : 0,
               child: IgnorePointer(
-                ignoring: !_showOverlay,
+                ignoring: !_showOverlay && !_editingLayout,
                 child: AnimatedOpacity(
-                  opacity: _showOverlay ? 1 : 0,
+                  opacity: _showOverlay || _editingLayout ? 1 : 0,
                   duration: const Duration(milliseconds: 250),
-                  child: OnScreenPad(state: _client.state),
+                  child: OnScreenPad(
+                    state: _client.state,
+                    layout: _layout,
+                    editMode: _editingLayout,
+                    selectedId: _selectedControlId,
+                    onSelect: (id) => setState(() => _selectedControlId = id),
+                    onElementMoved: _onElementMoved,
+                  ),
                 ),
               ),
             ),
-            if (!_showOverlay) Positioned.fill(top: 58, child: _hiddenView()),
-            Positioned(top: 8, left: 12, right: 12, child: _bar()),
+            if (!_showOverlay && !_editingLayout) Positioned.fill(top: 58, child: _hiddenView()),
+            Positioned(
+              top: 8,
+              left: 12,
+              right: 12,
+              child: _editingLayout ? _editorBar() : _bar(),
+            ),
+            if (_editingLayout)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 8,
+                child: LayoutBottomToolbar(
+                  selectedElem: selectedElem,
+                  onPrev: () => _cycleElement(-1),
+                  onNext: () => _cycleElement(1),
+                  onScaleDown: () => _changeScale(-0.1),
+                  onScaleUp: () => _changeScale(0.1),
+                  onToggleVisibility: _toggleVisibility,
+                  onReset: _resetSelectedElement,
+                ),
+              ),
           ]),
         ),
       ),
@@ -843,6 +1028,12 @@ class _ControllerScreenState extends State<ControllerScreen> {
       if (up) LinkChip(bluetooth: _client.bluetooth, rttMs: _client.rttMs),
       const Spacer(),
       BarButton(
+        icon: Icons.dashboard_customize_outlined,
+        tooltip: 'Customize touch controls',
+        onPressed: _startLayoutEdit,
+      ),
+      const SizedBox(width: 8),
+      BarButton(
         icon: _showOverlay ? Icons.visibility_outlined : Icons.visibility_off_outlined,
         tooltip: 'Toggle touch controls',
         onPressed: () => setState(() => _showOverlay = !_showOverlay),
@@ -858,6 +1049,99 @@ class _ControllerScreenState extends State<ControllerScreen> {
       BarButton(icon: Icons.tune, tooltip: 'Calibrate', onPressed: _openCalibration),
       const SizedBox(width: 8),
       BarButton(icon: Icons.flip, tooltip: 'Flip screen', onPressed: _flip),
+    ]);
+  }
+
+  Widget _editorBar() {
+    return Row(children: [
+      Material(
+        color: C.panel.withAlpha(204),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: C.line),
+        ),
+        child: InkWell(
+          onTap: _cancelLayoutEdit,
+          customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 14, 0),
+            child: SizedBox(
+              height: 42,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.close, size: 20, color: C.ink),
+                const SizedBox(width: 4),
+                Text('CANCEL', style: display(12, spacing: 1.8)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 12),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: C.panel.withAlpha(204),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: C.line),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: C.lime,
+              boxShadow: [BoxShadow(color: C.lime, blurRadius: 8)],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text('EDIT CONTROLS', style: display(13, spacing: 1.4)),
+        ]),
+      ),
+      const Spacer(),
+      BarButton(
+        icon: Icons.layers_outlined,
+        tooltip: 'Layout presets',
+        onPressed: _showPresets,
+      ),
+      const SizedBox(width: 8),
+      BarButton(
+        icon: Icons.settings_outlined,
+        tooltip: 'Layout settings',
+        onPressed: _showSettings,
+      ),
+      const SizedBox(width: 8),
+      BarButton(
+        icon: Icons.restart_alt_outlined,
+        tooltip: 'Reset all controls',
+        onPressed: _resetAllElements,
+      ),
+      const SizedBox(width: 8),
+      DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: C.lime.withAlpha(60), blurRadius: 18)],
+        ),
+        child: Material(
+          color: C.lime,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: InkWell(
+            onTap: _saveLayout,
+            customBorder: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: SizedBox(
+                height: 42,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.check, size: 18, color: C.bg),
+                  const SizedBox(width: 6),
+                  Text('SAVE', style: display(12, color: C.bg, spacing: 1.8)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
     ]);
   }
 
